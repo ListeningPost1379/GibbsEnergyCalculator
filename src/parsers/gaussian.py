@@ -4,8 +4,10 @@ from .base import BaseParser
 
 class GaussianParser(BaseParser):
     @classmethod
-    def detect(cls, content: str) -> bool: # [修改] 参数名改为 content
-        return "Gaussian, Inc." in content
+    def detect(cls, content: str) -> bool:
+        # [核心修复] 同时兼容两种常见的 Gaussian 头部标识
+        # 这里的修复解决了 "Unsupported file format" 问题
+        return "Gaussian, Inc." in content or "Entering Gaussian System" in content
     
     def is_finished(self): return "Normal termination" in self.content
     
