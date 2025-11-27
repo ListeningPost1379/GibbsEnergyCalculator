@@ -8,3 +8,16 @@ wheels/
 
 # Virtual environments
 .venv
+
+# 忽略计算数据，但保留目录结构（如果目录内有 .gitkeep）
+data/opt/*
+data/sp/*
+data/gas/*
+data/solv/*
+xyz/*
+
+# 忽略日志
+*.log
+*.json
+!templates/*.gjf
+!templates/*.inp

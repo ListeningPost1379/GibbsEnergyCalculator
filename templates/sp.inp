@@ -1,0 +1,14 @@
+! PWPB95 D4 X2C ma-DKH-def2-TZVP SARC/J RIJCOSX tightSCF
+%basis
+AuxC  "AutoAux" 
+NewGTO La "SARC-DKH-TZVP" end
+NewGTO Lu "SARC-DKH-TZVP" end
+NewGTO Ac "SARC-DKH-TZVP" end
+NewGTO Th "SARC-DKH-TZVP" end
+end
+%maxcore  6000
+%pal nprocs  32 end
+
+* xyz [Charge] [Multiplicity]
+[GEOMETRY]
+*

@@ -1,0 +1,17 @@
+! M062X 6-31G* AutoAux tightSCF SMD(water) DRACO nopop
+%basis
+NewGTO La "def-TZVP" end
+NewECP La  "def-ECP" end
+NewGTO Lu "def-TZVP" end
+NewECP Lu  "def-ECP" end
+NewGTO Ac "def-TZVP" end
+NewECP Ac  "def-ECP" end
+NewGTO Th "def-TZVP" end
+NewECP Th  "def-ECP" end
+end
+%maxcore  6000
+%pal nprocs  32 end
+
+* xyz [Charge] [Multiplicity]
+[GEOMETRY]
+*

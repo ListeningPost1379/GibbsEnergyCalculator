@@ -1,0 +1,23 @@
+%chk=[NAME].chk
+#p M052X/genecp
+
+[NAME]
+
+[Charge] [Multiplicity]
+[GEOMETRY]
+
+-C -N -O -H
+6-31G*
+****
+-U
+SDD
+****
+
+-U
+SDD
+
+
+
+
+
+
