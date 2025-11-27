@@ -52,6 +52,7 @@ class StatusTracker:
         if record.get("start_time"):
             duration = time.time() - record["start_time"]
             record["duration_sec"] = duration
+            # 注意：这里调用的是静态方法 format_duration
             record["duration_str"] = self.format_duration(duration)
         
         record["status"] = status
@@ -73,6 +74,7 @@ class StatusTracker:
 
     @staticmethod
     def format_duration(seconds: float) -> str:
+        """格式化时间为 HHh MMm SSs"""
         if seconds is None: return ""
         m, s = divmod(int(seconds), 60)
         h, m = divmod(m, 60)
@@ -81,47 +83,38 @@ class StatusTracker:
         return f"{s}s"
 
     def print_dashboard(self):
-        """清屏并打印严格对齐的仪表盘 (单行显示错误)"""
+        """清屏并打印双表格"""
         os.system('cls' if os.name == 'nt' else 'clear')
 
-        # 定义列宽
+        all_keys = sorted(self.data.keys())
+        main_tasks = [k for k in all_keys if not k.startswith("[Extra]")]
+        extra_tasks = [k for k in all_keys if k.startswith("[Extra]")]
+
         W_MOL = 16
         W_STEP = 16
         W_G = 14
         
-        # 表头
-        # 这里的格式化必须和下面 row 的格式化完全一致
-        header = (
-            f"{Colors.BOLD}"
-            f"{'MOLECULE':<{W_MOL}} "
-            f"{'OPT':<{W_STEP}} {'GAS':<{W_STEP}} {'SOLV':<{W_STEP}} {'SP':<{W_STEP}} "
-            f"{'G(kcal)':<{W_G}} {'NOTE'}"
-            f"{Colors.ENDC}"
-        )
-        
+        # --- 主表格 ---
         print(f"\n{Colors.BOLD}{'='*120}{Colors.ENDC}")
-        print(header)
+        print(f"{Colors.BOLD}{'MOLECULE':<{W_MOL}} {'OPT':<{W_STEP}} {'GAS':<{W_STEP}} {'SOLV':<{W_STEP}} {'SP':<{W_STEP}} {'G(kcal)':<{W_G}} {'NOTE'}{Colors.ENDC}")
         print(f"{Colors.BOLD}{'-'*120}{Colors.ENDC}")
         
-        for mol_name in sorted(self.data.keys()):
+        if not main_tasks:
+            print(f"{Colors.GREY}  (No main workflow tasks yet){Colors.ENDC}")
+
+        for mol_name in main_tasks:
             steps = self.data[mol_name]
-            
-            # 1. 分子名
             row = f"{Colors.CYAN}{mol_name[:W_MOL-1]:<{W_MOL}}{Colors.ENDC} "
-            
-            # 收集错误信息，放在最后显示
             error_notes = []
 
-            # 2. 步骤状态
             for step in ["opt", "gas", "solv", "sp"]:
                 info = steps.get(step, {})
                 st = info.get("status", "PENDING")
                 dur = info.get("duration_str", "")
                 err = info.get("error", "")
 
-                content = ""
+                content = "PENDING"
                 color = Colors.GREY
-                
                 if st == "DONE":
                     content = f"DONE {dur}" if dur else "DONE"
                     color = Colors.GREEN
@@ -132,31 +125,48 @@ class StatusTracker:
                     content = "ERROR"
                     color = Colors.RED
                     if err: error_notes.append(f"{step.upper()}:{err}")
-                else:
-                    content = "PENDING"
-                    color = Colors.GREY
                 
-                # 格式化单元格: [CONTENT]
-                cell_text = f"[{content}]"
-                # ANSI 颜色字符不占用视觉宽度，但占字符串长度，所以要单独处理填充
-                # 这里简单处理：让颜色代码紧贴文字
-                row += f"{color}{cell_text:<{W_STEP}}{Colors.ENDC} "
+                row += f"{color}{f'[{content}]':<{W_STEP}}{Colors.ENDC} "
 
-            # 3. G值
             res = steps.get("result_g")
             if res is not None:
                 row += f"{Colors.WHITE}{Colors.BOLD}{res:<{W_G}.2f}{Colors.ENDC} "
             else:
                 row += f"{Colors.GREY}{'-':<{W_G}}{Colors.ENDC} "
 
-            # 4. Note (显示在一行)
             if error_notes:
                 note_str = " | ".join(error_notes)
-                # 截断过长的错误信息
                 if len(note_str) > 30: note_str = note_str[:27] + "..."
                 row += f"{Colors.RED}{note_str}{Colors.ENDC}"
             
             print(row)
+
+        # --- 清扫模式表格 ---
+        if extra_tasks:
+            print(f"\n{Colors.BOLD}{'='*60}{Colors.ENDC}")
+            print(f"{Colors.YELLOW}{'SWEEPER MODE TASKS (Extra Jobs)':^60}{Colors.ENDC}")
+            print(f"{Colors.BOLD}{'-'*60}{Colors.ENDC}")
+            print(f"{Colors.BOLD}{'JOB FILE':<25} {'FOLDER':<15} {'STATUS':<20}{Colors.ENDC}")
+            
+            for key in extra_tasks:
+                display_name = key.replace("[Extra]", "")
+                task_data = self.data[key]
+                for folder, info in task_data.items():
+                    if folder == "result_g": continue
+
+                    st = info.get("status", "PENDING")
+                    dur = info.get("duration_str", "")
+                    err = info.get("error", "")
+
+                    status_str = f"[{st}]"
+                    if st == "DONE":
+                        status_str = f"{Colors.GREEN}[DONE {dur}]{Colors.ENDC}"
+                    elif st == "RUNNING":
+                        status_str = f"{Colors.YELLOW}[RUNNING...]{Colors.ENDC}"
+                    elif st == "ERROR":
+                        status_str = f"{Colors.RED}[ERROR: {err}]{Colors.ENDC}"
+                    
+                    print(f"{Colors.CYAN}{display_name:<25}{Colors.ENDC} {folder:<15} {status_str}")
 
         print(f"{Colors.BOLD}{'='*120}{Colors.ENDC}")
         print(f"{Colors.YELLOW}Real-time Status:{Colors.ENDC}")
