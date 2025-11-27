@@ -1,11 +1,10 @@
 # mock_engine.py
 import sys
 import time
-import argparse
 from pathlib import Path
 
-# 符合 src/parsers/gaussian.py 正则要求的标准输出模板
-SUCCESS_TEMPLATE = """
+# --- Gaussian 模板 ---
+GAUSSIAN_TEMPLATE = """
  Entering Gaussian System
  Charge = {charge} Multiplicity = {mult}
  SCF Done:  E(RM062X) = {energy}     A.U. after   11 cycles
@@ -26,37 +25,56 @@ SUCCESS_TEMPLATE = """
  Normal termination of Gaussian 16
 """
 
-FAIL_TEMPLATE = """
- Entering Gaussian System
- Charge = 0 Multiplicity = 1
- SCF Done:  E(RM062X) = -100.0     A.U. after   1 cycles
- Error termination via Lnk1e.
+# --- ORCA 模板 ---
+# 必须包含 src/parsers/orca.py 所需的所有关键词
+ORCA_TEMPLATE = """
+                                 * O   R   C   A *
+           * O   R   C   A *
+
+ Total Charge           Charge          ...    {charge}
+ Multiplicity           Mult            ...    {mult}
+
+ FINAL SINGLE POINT ENERGY       {energy}
+
+ VIBRATIONAL FREQUENCIES
+    0:   100.50 cm**-1
+    1:   200.60 cm**-1
+
+ G-E(el)                               ...      {thermal} Eh
+
+ FINAL ENERGY EVALUATION AT THE STATIONARY POINT
+
+ CARTESIAN COORDINATES (ANGSTROEM)
+ ---------------------------------
+ O      0.000000    0.000000    0.117790
+ H      0.000000    0.758602   -0.471160
+ H      0.000000   -0.758602   -0.471160
+ 
+ ****ORCA TERMINATED NORMALLY****
 """
 
+FAIL_TEMPLATE = "Error termination / ORCA finished by error"
+
 def run():
-    # 模拟命令行调用: python mock_engine.py <input> <output>
+    # Usage: python mock_engine.py <input> <output>
     if len(sys.argv) < 3: return
     input_file = Path(sys.argv[1])
     output_file = Path(sys.argv[2])
     
     fname = input_file.name
+    is_orca = input_file.suffix == ".inp"
     
-    # === 模拟耗时 (为了让你看到仪表盘的 RUNNING 状态) ===
-    # 主线任务稍快，清扫任务稍慢
-    sleep_time = 2.0 if "Extra" in str(output_file) else 0.5
-    time.sleep(sleep_time)
+    # 模拟计算耗时
+    time.sleep(0.3)
 
-    # === 场景模拟 ===
-    
-    # 1. 模拟失败 (如果文件名包含 fail)
+    # 1. 模拟失败
     if "fail" in fname:
         with open(output_file, 'w') as f:
             f.write(FAIL_TEMPLATE)
         return
 
-    # 2. 模拟成功
-    # 根据任务类型生成不同的能量，以便验证 G 计算是否正确
-    # 假设: Opt=-76.0, Gas=-76.0, Solv=-76.1, SP=-76.5
+    # 2. 模拟能量 (为了验证 G 计算)
+    # 假设标准值: Opt=-76.0, Gas=-76.0, Solv=-76.1, SP=-76.5
     energy = -76.0000
     thermal = 0.0500
     
@@ -64,9 +82,15 @@ def run():
     elif "gas" in fname: energy = -76.0000
     elif "solv" in fname: energy = -76.1000
     
-    content = SUCCESS_TEMPLATE.format(
-        charge=0, mult=1, energy=energy, thermal=thermal
-    )
+    # 3. 生成内容
+    if is_orca:
+        content = ORCA_TEMPLATE.format(
+            charge=0, mult=1, energy=energy, thermal=thermal
+        )
+    else:
+        content = GAUSSIAN_TEMPLATE.format(
+            charge=0, mult=1, energy=energy, thermal=thermal
+        )
     
     with open(output_file, 'w') as f:
         f.write(content)

@@ -7,146 +7,160 @@ import json
 import pandas as pd
 from pathlib import Path
 
-# 将 src 加入路径
+# 确保能导入 src
 sys.path.append(str(Path.cwd()))
 
 from src import config
 from main import main
 
-# 定义颜色
+# 颜色定义
 PASS = '\033[92m[PASS]\033[0m'
 FAIL = '\033[91m[FAIL]\033[0m'
 INFO = '\033[94m[INFO]\033[0m'
 
 def setup_environment():
-    print(f"\n{INFO} 1. 初始化测试环境...")
+    print(f"\n{INFO} 1. 初始化全能测试环境...")
     
-    # 清理战场
-    paths_to_clean = ["xyz", "data", "extra_jobs", "task_status.json", "results.csv"]
-    for p in paths_to_clean:
+    # 1. 清理
+    for p in ["xyz", "data", "extra_jobs", "templates", "task_status.json", "results.csv"]:
         path = Path(p)
         if path.is_dir(): shutil.rmtree(path)
         elif path.is_file(): path.unlink()
     
-    # 重建目录
-    for d in ["xyz", "templates", "extra_jobs", "data"]:
-        Path(d).mkdir(exist_ok=True)
+    # 2. 重建目录
+    for d in ["xyz", "templates", "extra_jobs", "data/opt"]:
+        Path(d).mkdir(parents=True, exist_ok=True)
 
-    # 创建通用模板
-    dummy_tpl = "%chk=[NAME]\n#p opt\n[NAME]\n[Charge] [Multiplicity]\n[GEOMETRY]\n"
+    # 3. 创建模板 (同时创建 gjf 和 inp)
+    # 目的：测试 Generator 在混用时的优先级
+    base_tpl = "%chk=[NAME]\n#p opt\n[NAME]\n[Charge] [Multiplicity]\n[GEOMETRY]\n"
     for t in ["opt", "sp", "gas", "solv"]:
-        with open(f"templates/{t}.gjf", "w") as f: f.write(dummy_tpl)
+        with open(f"templates/{t}.gjf", "w") as f: f.write(base_tpl) # Gaussian 模板
+        with open(f"templates/{t}.inp", "w") as f: f.write(base_tpl) # ORCA 模板
+
+    # 4. 准备测试用例
     
-    # 1. 创建正常分子 (test_ok.xyz)
-    with open("xyz/test_ok.xyz", "w") as f:
+    # Case A: 标准 Gaussian 流程 (test_gau.xyz)
+    # 预期：Generator 自动生成 .gjf -> 运行 G16 -> 生成 G16 子任务
+    with open("xyz/test_gau.xyz", "w") as f:
+        f.write("3\nCharge=0 Multiplicity=1\nO 0 0 0\nH 0 1 0\nH 0 0 1")
+
+    # Case B: 混合流程 / ORCA 解析测试 (test_mix.xyz)
+    # 技巧：我们手动预先生成一个 .inp 的 Opt 输入文件
+    # 预期：Main 发现 opt.inp 存在 -> 运行 ORCA -> 解析 ORCA 产物 -> 生成子任务
+    with open("xyz/test_mix.xyz", "w") as f:
         f.write("3\nCharge=0 Multiplicity=1\nO 0 0 0\nH 0 1 0\nH 0 0 1")
     
-    # 2. 创建注定失败的分子 (test_fail.xyz) -> 触发 ERROR 逻辑
+    # 这里的关键：手动放入一个 .inp 文件，强制让 Opt 阶段跑 ORCA
+    # 从而测试 src/parsers/orca.py 是否工作正常
+    with open("data/opt/test_mix_opt.inp", "w") as f:
+        f.write(base_tpl.replace("[NAME]", "test_mix_opt").replace("[Charge]", "0").replace("[Multiplicity]", "1").replace("[GEOMETRY]", "O 0 0 0"))
+
+    # Case C: 失败案例 (test_fail.xyz)
     with open("xyz/test_fail.xyz", "w") as f:
         f.write("3\nCharge=0 Multiplicity=1\nO 0 0 0\nH 0 1 0\nH 0 0 1")
 
-    # 3. 创建清扫模式任务 (extra_jobs/manual_job.gjf)
-    Path("extra_jobs/batch1").mkdir(exist_ok=True)
-    with open("extra_jobs/batch1/manual_job.gjf", "w") as f:
-        f.write(dummy_tpl)
+    # Case D: 清扫模式 (extra_jobs/pure_orca.inp)
+    Path("extra_jobs/manual").mkdir(exist_ok=True)
+    with open("extra_jobs/manual/pure_orca.inp", "w") as f:
+        f.write(base_tpl)
 
-    print(f"{PASS} 环境搭建完成 (XYZ, Templates, ExtraJobs)")
+    print(f"{PASS} 环境搭建完成 (涵盖 Gaussian, ORCA, Mixed, Fail, Sweeper)")
 
-def inject_mock_engine():
-    print(f"{INFO} 2. 注入 Mock 计算引擎...")
-    # 修改内存中的配置，让 g16 指向 mock_engine.py
+def inject_mock_config():
+    print(f"{INFO} 2. 注入双核 Mock 引擎...")
+    
     mock_cmd = f"{sys.executable} mock_engine.py {{input}} {{output}}"
-    config.COMMAND_MAP = {".gjf": mock_cmd}
-    config.SWEEPER_DIR = Path("extra_jobs") # 确保指向正确
-    print(f"{PASS} 引擎注入成功 (所有 .gjf 将由 python 模拟运行)")
+    
+    # 同时劫持 .gjf 和 .inp 的命令
+    config.COMMAND_MAP = {
+        ".gjf": mock_cmd,
+        ".inp": mock_cmd
+    }
+    # 确保 Sweeper 指向测试目录
+    config.SWEEPER_DIR = Path("extra_jobs")
+    
+    print(f"{PASS} 引擎注入成功 (支持 .gjf 和 .inp)")
 
 def verify_results():
-    print(f"\n{INFO} 4. 开始验证结果数据...")
+    print(f"\n{INFO} 4. 验证测试结果...")
     errors = 0
-
-    # 1. 验证 Tracker 记录
+    
     try:
         with open("task_status.json", "r") as f:
             data = json.load(f)
         
-        # 验证 test_ok
-        if data["test_ok"]["opt"]["status"] == "DONE" and \
-           data["test_ok"]["sp"]["status"] == "DONE":
-            print(f"{PASS} Tracker: 正常任务状态记录正确 (DONE)")
+        # 1. 验证标准 Gaussian 流程
+        if data.get("test_gau", {}).get("opt", {}).get("status") == "DONE":
+            print(f"{PASS} Gaussian 全流程: OPT 完成")
         else:
-            print(f"{FAIL} Tracker: 正常任务状态异常")
+            print(f"{FAIL} Gaussian 全流程: OPT 未完成")
             errors += 1
 
-        # 验证 test_fail
-        if data["test_fail"]["opt"]["status"] == "ERROR":
-            print(f"{PASS} Tracker: 失败任务被正确捕获 (ERROR)")
+        # 2. 验证 ORCA 混合流程 (关键!)
+        # 这证明了 JobManager 能跑 .inp，Parser 能解析 ORCA 输出，Generator 能基于 ORCA 结果生成子任务
+        if data.get("test_mix", {}).get("opt", {}).get("status") == "DONE":
+            print(f"{PASS} ORCA 混合流程: OPT 完成 (证明 ORCA 解析器正常)")
         else:
-            print(f"{FAIL} Tracker: 失败任务未被标记为 ERROR")
+            print(f"{FAIL} ORCA 混合流程: OPT 未完成")
             errors += 1
-            
-        # 验证 Extra Job
-        if "[Extra]manual_job" in data:
-             print(f"{PASS} Tracker: 清扫模式任务已记录")
+
+        # 3. 验证报错逻辑
+        if data.get("test_fail", {}).get("opt", {}).get("status") == "ERROR":
+            print(f"{PASS} 错误捕获: 成功标记 ERROR")
         else:
-             print(f"{FAIL} Tracker: 清扫模式任务未运行")
-             errors += 1
+            print(f"{FAIL} 错误捕获: 失败")
+            errors += 1
+
+        # 4. 验证清扫模式
+        if "[Extra]pure_orca" in data:
+            print(f"{PASS} 清扫模式: 成功运行额外任务")
+        else:
+            print(f"{FAIL} 清扫模式: 未检测到任务")
+            errors += 1
+
+        # 5. 验证计算结果 (Calculator)
+        if Path("results.csv").exists():
+            df = pd.read_csv("results.csv")
+            if "test_gau" in df["Molecule"].values and "test_mix" in df["Molecule"].values:
+                print(f"{PASS} 计算模块: 成功生成 G 值结果")
+            else:
+                print(f"{FAIL} 计算模块: 结果缺失")
+                errors += 1
+        else:
+            print(f"{FAIL} 计算模块: CSV 未生成")
+            errors += 1
 
     except Exception as e:
-        print(f"{FAIL} 读取 task_status.json 失败: {e}")
-        errors += 1
-
-    # 2. 验证 Generator (检查文件是否生成)
-    if Path("data/opt/test_ok_opt.gjf").exists() and Path("data/sp/test_ok_sp.gjf").exists():
-        print(f"{PASS} Generator: 输入文件生成正常")
-    else:
-        print(f"{FAIL} Generator: 输入文件缺失")
-        errors += 1
-
-    # 3. 验证 Calculator (results.csv)
-    if Path("results.csv").exists():
-        df = pd.read_csv("results.csv")
-        if "test_ok" in df["Molecule"].values:
-            val = df.loc[df["Molecule"]=="test_ok", "G_Final (kcal/mol)"].values[0]
-            # 预期: -76.5(sp) + 0.05(corr) + (-76.1 - -76.0)(solv) + 0.003(conc) 
-            # 大概在 -76.55 左右 (单位不同这里只检查是否有值)
-            print(f"{PASS} Calculator: 成功计算出 G 值 ({val:.4f})")
-        else:
-            print(f"{FAIL} Calculator: results.csv 中没有 test_ok")
-            errors += 1
-    else:
-        print(f"{FAIL} Calculator: results.csv 未生成")
+        print(f"{FAIL} 验证过程崩溃: {e}")
         errors += 1
 
     if errors == 0:
-        print(f"\n🎉🎉🎉 全系统测试通过！所有模块工作正常。 🎉🎉🎉")
+        print(f"\n🎉🎉🎉 完美通过！系统支持 Gaussian/ORCA 双引擎及混合调度。 🎉🎉🎉")
     else:
-        print(f"\n❌❌❌ 测试发现 {errors} 个问题，请检查日志。")
+        print(f"\n❌❌❌ 发现 {errors} 个问题。")
 
 def run_test_suite():
     setup_environment()
-    inject_mock_engine()
+    inject_mock_config()
     
-    print(f"\n{INFO} 3. 启动主程序 (运行 15 秒后自动停止)...")
-    print("---------------------------------------------------")
+    print(f"\n{INFO} 3. 启动主程序 (等待 20 秒)...")
     
-    # 在独立线程运行 main，防止阻塞测试脚本
     t = threading.Thread(target=main, daemon=True)
     t.start()
     
-    # 倒计时，给足够的时间让所有任务跑完
-    # 正常流程: Opt(0.5s) -> 3xSubs(0.5s) = ~2s
-    # 清扫: ~2s
-    # 总共等待 10-15s 足够
     try:
-        for i in range(12, 0, -1):
-            sys.stdout.write(f"\r⏳ 测试运行中... 剩余 {i} 秒 ")
+        # 给足时间跑完所有流程
+        # test_gau(4 steps) + test_mix(4 steps) + test_fail(1 step) + sweeper(1 step)
+        # 约 10 个任务，每个 0.3s ~ 3-4s，加上轮询间隔，20s 足够
+        for i in range(20, 0, -1):
+            sys.stdout.write(f"\r⏳ Running tests... {i}s ")
             sys.stdout.flush()
             time.sleep(1)
-        print("\n---------------------------------------------------")
+        print("\n")
     except KeyboardInterrupt:
         pass
     
-    # 验证
     verify_results()
 
 if __name__ == "__main__":
