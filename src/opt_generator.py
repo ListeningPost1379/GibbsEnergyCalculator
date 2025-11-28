@@ -34,7 +34,10 @@ class OptGenerator:
         mult = int(cm_match.group(2))
 
         # Line 3+: Coords
-        coords = "".join([line for line in lines[2:] if line.strip()])
+        # 修复：使用 strip() 去除首尾空白，并只添加一个换行符，防止多余空行
+        coords_raw = "".join([line for line in lines[2:] if line.strip()])
+        coords = coords_raw.strip() + "\n"
+        
         return charge, mult, coords
 
     def generate(self, xyz_path: Path) -> Path:
