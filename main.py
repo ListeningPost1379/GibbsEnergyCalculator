@@ -1,4 +1,5 @@
 import time, sys
+import threading
 from pathlib import Path
 from src import config
 from src.parsers import get_parser
@@ -27,8 +28,12 @@ def main():
     opt_gen, sub_gen, sweeper = OptGenerator(), SubGenerator(), TaskSweeper(mgr)
     config.SWEEPER_DIR.mkdir(exist_ok=True)
     
+    # --- 修改：创建停止信号 ---
+    stop_event = threading.Event()
+
     def workflow_loop():
-        while True:
+        # --- 修改：循环检查停止信号 ---
+        while not stop_event.is_set():
             xyz_files = scan_xyz(config.XYZ_DIR)
             xyz_order_list = [f.stem for f in xyz_files]
             
@@ -37,6 +42,9 @@ def main():
             act = False
             
             for xyz_file in xyz_files:
+                # 每次循环开始前检查是否需要退出
+                if stop_event.is_set(): return
+
                 mol = xyz_file.stem
                 tracker.mark_xyz_found(mol)
                 
@@ -46,7 +54,10 @@ def main():
                 if not opt_in:
                     try: 
                         opt_in = opt_gen.generate(xyz_file)
-                        if not mgr.submit_and_wait(opt_in, mol, "opt", xyz_list=xyz_order_list): continue 
+                        # submit_and_wait 内部如果被 kill 会返回 False，不影响逻辑，下一次循环检测 stop_event 即可
+                        if not mgr.submit_and_wait(opt_in, mol, "opt", xyz_list=xyz_order_list): 
+                            if stop_event.is_set(): return # 立即退出
+                            continue 
                         cleanup_sub_tasks(mol)
                         act = True; break 
                     except Exception as e: 
@@ -57,7 +68,9 @@ def main():
                 
                 if not opt_out.exists():
                     tracker.finish_task(mol, "opt", "MISSING", "Output deleted")
-                    if not mgr.submit_and_wait(opt_in, mol, "opt", xyz_list=xyz_order_list): continue
+                    if not mgr.submit_and_wait(opt_in, mol, "opt", xyz_list=xyz_order_list):
+                        if stop_event.is_set(): return
+                        continue
                     cleanup_sub_tasks(mol)
                     act = True; break
                 else:
@@ -82,6 +95,8 @@ def main():
                 # --- PHASE 3: RUN SUBS ---
                 grp_fail = False
                 for t in subs:
+                    if stop_event.is_set(): return
+
                     job_in = next((config.DIRS[t]/f"{mol}_{t}{e}" for e in config.VALID_EXTENSIONS if (config.DIRS[t]/f"{mol}_{t}{e}").exists()), None)
                     if not job_in: grp_fail = True; break
                     
@@ -89,6 +104,7 @@ def main():
                     if not job_out.exists():
                         tracker.finish_task(mol, t, "MISSING", "Output deleted")
                         if not mgr.submit_and_wait(job_in, mol, t, xyz_list=xyz_order_list): 
+                            if stop_event.is_set(): return
                             grp_fail = True; break
                         act = True; break 
                     else:
@@ -114,11 +130,12 @@ def main():
 
             if not act and not sweeper.run():
                 tracker.set_running_msg("Idle. Scanning...")
-                try: time.sleep(1)
-                except KeyboardInterrupt: break
+                # --- 修改：使用 event 等待，响应更及时 ---
+                if stop_event.wait(timeout=1.0):
+                    return # 如果在等待期间 set 了信号，立即退出
     
-    # 传入 mgr
-    app = GibbsApp(workflow_loop, tracker, mgr)
+    # 传入 mgr 和 stop_event
+    app = GibbsApp(workflow_loop, tracker, mgr, stop_event)
     app.run()
 
 if __name__ == "__main__": main()

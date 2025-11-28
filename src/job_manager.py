@@ -10,7 +10,7 @@ class JobManager:
     def __init__(self, tracker=None):
         self.tracker = tracker
         self.last_int = 0.0
-        self.current_proc = None # 新增：持有当前进程句柄
+        self.current_proc = None # 持有当前进程句柄
 
     def get_status_from_file(self, filepath: Path, is_opt: bool = False) -> tuple[str, str]:
         if not filepath.exists(): return "MISSING", ""
@@ -38,20 +38,15 @@ class JobManager:
             self.tracker.start_task(mol_name, step)
             self.tracker.set_running_msg(f"Running: {mol_name} [{step.upper()}] ... 0s")
 
+        # --- 修改开始：移除 try-except KeyboardInterrupt ---
         try:
-            # 保存进程对象到 self.current_proc
             self.current_proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception as e:
-            if self.tracker: self.tracker.finish_task(mol_name, step, "ERROR", str(e))
-            self.current_proc = None
-            return False
-
-        start_time = time.time()
-        try:
+            
+            start_time = time.time()
+            
             # 循环检查进程是否结束
             while self.current_proc.poll() is None:
                 elap = time.time() - start_time
-                # 使用 format_duration 格式化运行时间
                 from .tracker import StatusTracker
                 time_str = StatusTracker.format_duration(elap)
                 
@@ -61,15 +56,15 @@ class JobManager:
                     self.tracker.set_running_msg(msg)
                 
                 time.sleep(0.5)
-                
-        except KeyboardInterrupt:
-            # 这里的 KeyboardInterrupt 主要是为了防止终端直接 Ctrl+C 杀掉主进程
-            self.stop_current_job()
-            if self.tracker: self.tracker.finish_task(mol_name, step, "ERROR", "User Skipped")
+
+        except Exception as e:
+            # 这里的 Exception 不会捕获 KeyboardInterrupt (Ctrl+C)
+            if self.tracker: self.tracker.finish_task(mol_name, step, "ERROR", str(e))
+            self.current_proc = None
             return False
         finally:
-            # 确保退出前清空引用
             self.current_proc = None
+        # --- 修改结束 ---
 
         status, err = self.get_status_from_file(output_file, is_opt=(step=="opt"))
         if self.tracker: self.tracker.finish_task(mol_name, step, status, err)
