@@ -126,21 +126,18 @@ class GibbsWorkflowTests(unittest.TestCase):
         tracker = StatusTracker(str(TEST_LOG))
         mgr = JobManager(tracker)
         
-        # 创建一个耗时较长的假任务 (5秒)
+        # ... (之前的代码不变) ...
         long_job = TEST_EXTRA / "long_job.gjf"
         with open(long_job, 'w') as f: f.write("Mock")
         
-        # 修改 Mock 命令使其睡 5 秒
+        # 修改 Mock 命令
         mock_script = Path("mock_program.py").absolute()
         cmd_long = f"{sys.executable} {mock_script} {{input}} {{output}} 5.0"
         original_cmd = config.COMMAND_MAP[".gjf"]
         config.COMMAND_MAP[".gjf"] = cmd_long
 
-        # 启动一个线程或异步运行 submit? 
-        # 由于 submit_and_wait 是阻塞的，我们这里直接测试 stop_current_job 的逻辑
-        # 我们手动启动一个 Popen 模拟 submit_and_wait 的内部行为
-        
         print("   >> Starting long process...")
+        # 模拟 JobManager 的 submit 行为，手动启动进程
         mgr.current_proc = import_subprocess().Popen(
             f"{sys.executable} -c 'import time; time.sleep(5)'", 
             shell=True
@@ -152,9 +149,12 @@ class GibbsWorkflowTests(unittest.TestCase):
         print("   >> Sending Stop signal...")
         mgr.stop_current_job()
         
-        time.sleep(0.5) # 给一点时间让 OS 杀进程
-        # 注意：kill() 后 poll() 可能需要在 wait() 后才更新，或者稍等
-        # 在 Windows/Linux 行为可能不同，只要不再阻塞即可
+        # --- 修复：显式等待进程结束以消除 ResourceWarning ---
+        try:
+            mgr.current_proc.wait(timeout=2)
+        except:
+            pass
+        # ------------------------------------------------
         
         # 恢复命令配置
         config.COMMAND_MAP[".gjf"] = original_cmd
@@ -163,6 +163,11 @@ class GibbsWorkflowTests(unittest.TestCase):
         """测试清扫模式"""
         print("\n🧪 Test 5: Sweeper Mode")
         
+        # --- 修复：先清理 Test 4 残留的文件 ---
+        for f in TEST_EXTRA.glob("*"):
+            f.unlink()
+        # ------------------------------------
+
         mgr = JobManager(StatusTracker(str(TEST_LOG)))
         sweeper = TaskSweeper(mgr)
         
@@ -174,10 +179,11 @@ class GibbsWorkflowTests(unittest.TestCase):
         ran = sweeper.run()
         
         self.assertTrue(ran, "Sweeper should have found and run the job")
+        
+        # 此时应该只运行了 manual_calc.gjf
         self.assertTrue(extra_job.with_suffix(".out").exists(), "Sweeper output missing")
         
         # 检查是否记录在 Tracker (带 [Extra] 前缀)
-        # 注意：Sweeper 记录的 Key 是 [Extra]filename
         key = "[Extra]manual_calc"
         with open(TEST_LOG, 'r') as f:
             data = json.load(f)
