@@ -2,46 +2,29 @@ import subprocess
 import time
 import sys
 from pathlib import Path
+from typing import Optional, List
 from . import config
 from .parsers import get_parser
-from .tracker import StatusTracker
 
 class JobManager:
     def __init__(self, tracker=None):
         self.tracker = tracker
         self.last_int = 0.0
+        self.current_proc = None # 新增：持有当前进程句柄
 
     def get_status_from_file(self, filepath: Path, is_opt: bool = False) -> tuple[str, str]:
-        """
-        仅基于文件内容判断状态。绝不返回 RUNNING。
-        """
-        if not filepath.exists():
-            return "MISSING", ""
-        
+        if not filepath.exists(): return "MISSING", ""
         try:
             parser = get_parser(filepath)
-            
-            # 1. 致命错误检查
-            if parser.is_failed():
-                return "ERROR", "Prog Error"
-            
-            # 2. 完整性检查 (如果程序中断，文件没写完，视为错误)
-            if not parser.is_finished():
-                return "ERROR", "Incomplete" 
-
-            # 3. 优化任务特有检查
+            if parser.is_failed(): return "ERROR", "Prog Error"
+            if not parser.is_finished(): return "ERROR", "Incomplete" 
             if is_opt:
-                if not parser.is_converged():
-                    return "ERR_NC", "Not Converged"
-                if parser.has_imaginary_freq():
-                    return "ERR_IMG", "Imag Freq"
-            
+                if not parser.is_converged(): return "ERR_NC", "Not Converged"
+                if parser.has_imaginary_freq(): return "ERR_IMG", "Imag Freq"
             return "DONE", ""
-            
-        except Exception as e:
-            return "ERROR", str(e)
+        except Exception as e: return "ERROR", str(e)
 
-    def submit_and_wait(self, job_file: Path, mol_name: str, step: str) -> bool:
+    def submit_and_wait(self, job_file: Path, mol_name: str, step: str, xyz_list: Optional[List[str]] = None) -> bool:
         ext = job_file.suffix
         cmd_template = config.COMMAND_MAP.get(ext)
         if not cmd_template:
@@ -51,34 +34,51 @@ class JobManager:
         output_file = job_file.with_suffix(".out")
         cmd = cmd_template.format(input=str(job_file), output=str(output_file))
         
-        # --- 显式设置 RUNNING 状态 ---
         if self.tracker: 
             self.tracker.start_task(mol_name, step)
-            self.tracker.print_dashboard() # 立即刷新让用户看到 RUNNING
+            self.tracker.set_running_msg(f"Running: {mol_name} [{step.upper()}] ... 0s")
 
         try:
-            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 保存进程对象到 self.current_proc
+            self.current_proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             if self.tracker: self.tracker.finish_task(mol_name, step, "ERROR", str(e))
+            self.current_proc = None
             return False
 
         start_time = time.time()
         try:
-            while proc.poll() is None:
+            # 循环检查进程是否结束
+            while self.current_proc.poll() is None:
                 elap = time.time() - start_time
-                # 终端动态显示，不依赖文件
-                sys.stdout.write(f"\r⏳ Running: {mol_name} [{step.upper()}] ... {elap/60:.1f} min   ")
-                sys.stdout.flush()
-                time.sleep(1)
+                # 使用 format_duration 格式化运行时间
+                from .tracker import StatusTracker
+                time_str = StatusTracker.format_duration(elap)
+                
+                msg = f"Running: {mol_name} [{step.upper()}] ... {time_str}"
+                
+                if self.tracker:
+                    self.tracker.set_running_msg(msg)
+                
+                time.sleep(0.5)
+                
         except KeyboardInterrupt:
-            if time.time() - self.last_int < 1.0:
-                proc.kill(); sys.exit(0)
-            self.last_int = time.time()
-            proc.kill()
+            # 这里的 KeyboardInterrupt 主要是为了防止终端直接 Ctrl+C 杀掉主进程
+            self.stop_current_job()
             if self.tracker: self.tracker.finish_task(mol_name, step, "ERROR", "User Skipped")
             return False
+        finally:
+            # 确保退出前清空引用
+            self.current_proc = None
 
-        # --- 任务结束后，通过文件判断最终状态 ---
         status, err = self.get_status_from_file(output_file, is_opt=(step=="opt"))
         if self.tracker: self.tracker.finish_task(mol_name, step, status, err)
         return status == "DONE"
+
+    def stop_current_job(self):
+        """强制停止当前任务"""
+        if self.current_proc:
+            try:
+                self.current_proc.kill()
+            except:
+                pass
