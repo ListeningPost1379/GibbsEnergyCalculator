@@ -10,7 +10,7 @@ wheels/
 # --- 忽略数据和具体计算文件 ---
 # 忽略 data 目录下的所有内容
 data/*
-
+!data/.gitkeep
 # 忽略 xyz 目录下的所有内容，但保留 .gitkeep (保留目录结构)
 xyz/*
 !xyz/.gitkeep
