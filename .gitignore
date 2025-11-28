@@ -1,25 +1,33 @@
-# Python-generated files
+# Python 生成的缓存文件
 __pycache__/
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
 .venv
-# IDE settings
-*.code-workspace
 
-# 忽略计算数据，但保留目录结构（如果目录内有 .gitkeep）
-data/opt/*
-data/sp/*
-data/gas/*
-data/solv/*
+# --- 忽略数据和具体计算文件 ---
+# 忽略 data 目录下的所有内容
+data/*
+
+# 忽略 xyz 目录下的所有内容，但保留 .gitkeep (保留目录结构)
 xyz/*
+!xyz/.gitkeep
 
-# 忽略日志
+# 忽略 extra_jobs 下的内容，但保留目录结构
+extra_jobs/*
+!extra_jobs/.gitkeep
+
+# 忽略日志和 JSON 状态文件
 *.log
 *.json
-!templates/*.gjf
-!templates/*.inp
+
+# --- 关键修改：忽略模板文件，但保留目录结构 ---
+# 1. 忽略 templates 下的所有文件
+templates/*
+# 2. 但是！不要忽略 .gitkeep 文件（这样目录结构会被推送到 GitHub）
+!templates/.gitkeep
+
+# --- 之前不小心推送的 IDE 配置文件 ---
+*.code-workspace
