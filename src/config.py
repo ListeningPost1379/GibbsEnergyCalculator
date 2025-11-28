@@ -22,7 +22,7 @@ VALID_EXTENSIONS = [".gjf", ".inp"]
 
 COMMAND_MAP = {
     ".gjf": "g16 < {input} > {output}", 
-    ".inp": "/opt/orca/orca {input} > {output}",
+    ".inp": "/usr/local/quantum/orca/orca {input} > {output}",
 }
 
 # ================= 物理常数 =================
