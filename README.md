@@ -1,153 +1,176 @@
-# 🐶 狗都会用的量子化学吉布斯自由能计算脚本
-**(Automated Gibbs Free Energy Workflow)**
+# ⚗️ Automated Gibbs Free Energy Workflow
+### (自动化吉布斯自由能计算工作流)
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![Manager](https://img.shields.io/badge/uv-enabled-purple)](https://github.com/astral-sh/uv)
-[![Status](https://img.shields.io/badge/Status-Stable-green)](https://github.com/)
+[![UI](https://img.shields.io/badge/Textual-TUI-green)](https://textual.textualize.io/)
 
-> **核心理念**：把 `.xyz` 扔进去，把 $\Delta G$ 拿出来。中间发生了什么？你不必知道，脚本会搞定一切。
-
----
-
-## ✨ 核心功能
-
-* **全自动流水线**：`XYZ` $\rightarrow$ `Opt` $\rightarrow$ `SP/Gas/Solv` $\rightarrow$ `Gibbs Free Energy`。
-* **双核驱动**：同时支持 **Gaussian 16** 和 **ORCA 5.x**，混用也没问题（比如用 Gaussian 优化，ORCA 算单点）。
-* **智能阻塞调度**：专为资源受限的节点设计。一个任务算完才提交下一个，不挤爆队列，不浪费机时。
-* **断点续传**：脚本挂了？服务器重启了？没关系，重启脚本后自动检测已完成的任务，绝不重复计算。
-* **动态插队**：中途想加个新分子？直接把 `.xyz` 扔进文件夹，脚本跑完当前任务立刻优先处理新来的。
-* **炫彩仪表盘**：实时显示的彩色面板，任务状态（RUNNING/DONE/ERROR）一目了然。
+> **核心理念**：把 `.xyz` 分子文件扔进去，脚本自动吐出 $\Delta G$ 数据。
+> 这是一个专为计算化学家设计的“挂机神器”，支持断点续传、自动纠错、资源调度和实时监控。
 
 ---
 
-## 📂 目录结构 (这很重要)
+## ✨ 核心功能 (Features)
 
-你的项目目录应该长这样，脚本会自动维护 `data/` 目录：
+* **全自动流水线 (Auto-Pipeline)**：
+    * 自动执行 `XYZ` $\rightarrow$ `Opt` (优化) $\rightarrow$ `Gas/Solv/SP` (子任务) $\rightarrow$ `Gibbs Calculation` 流程。
+    * 自动生成输入文件，无需手动编辑坐标。
+* **双引擎支持 (Dual Engine)**：
+    * 完美兼容 **Gaussian 16** (`.gjf`) 和 **ORCA 5.x** (`.inp`)。
+    * 支持混合使用（例如：用 Gaussian 做优化，用 ORCA 算高精度单点能）。
+* **清扫模式 (Sweeper Mode)** [NEW]：
+    * 主线任务跑完了？脚本不会闲着。
+    * 将独立的计算任务扔进 `extra_jobs/` 目录，脚本会在空闲时自动扫描并运行它们。
+* **智能调度 (Smart Scheduling)**：
+    * **阻塞式运行**：一个任务算完才提交下一个，避免挤爆服务器队列或内存。
+    * **动态插队**：随时添加新的 `.xyz` 文件，脚本会自动发现并优先处理。
+* **数据持久化**：
+    * 计算结果自动汇总写入 `results.csv`，告别手动抄数据的痛苦。
+* **现代化 TUI 界面**：
+    * 基于 Textual 的终端界面，实时展示主线任务进度和清扫任务状态。
+
+---
+
+## 📂 目录结构 (Directory Structure)
+
+项目运行后会自动维护以下结构，请确保 `templates` 和 `xyz` 目录已准备好：
 
 ```text
 GibbsEnergy/
-├── xyz/                <-- [投料口] 把你的 .xyz 文件扔这就行
-├── templates/          <-- [模具间] 存放 .gjf 或 .inp 模板文件
-├── data/               <-- [产物区] 自动生成，里面是分门别类的计算文件
-│   ├── opt/            # 结构优化任务
-│   ├── sp/             # 高精度单点能
-│   ├── gas/            # 气相校正
-│   └── solv/           # 液相校正
-├── src/                <-- [核心代码] 没事别动它
-├── main.py             <-- [启动器] 双击(或者命令行)运行它
-├── pyproject.toml      <-- [配置] 项目依赖管理
-└── run.sh              <-- [脚本] 服务器后台运行脚本
+├── xyz/                <-- [投料口] 放入你的 .xyz 分子结构文件
+├── templates/          <-- [模具间] 存放 .gjf 或 .inp 计算模板 (核心配置)
+├── extra_jobs/         <-- [清扫区] 存放不属于主线的独立计算任务 (如额外的单点)
+├── data/               <-- [产物区] 脚本自动生成，请勿手动混乱修改
+│   ├── opt/            # 结构优化任务文件
+│   ├── sp/             # 高精度单点能文件
+│   ├── gas/            # 气相校正文件
+│   └── solv/           # 液相校正文件
+├── results.csv         <-- [结果表] 最终计算出的吉布斯自由能汇总表
+├── src/                <-- [源代码] 核心逻辑
+├── main.py             <-- [启动器] 程序入口
+└── run.sh              <-- [脚本] 推荐使用此脚本启动
 ```
 
 ---
 
-## 🚀 傻瓜式用法 (Quick Start)
+## 🚀 快速开始 (Quick Start)
 
-### 1. 环境准备
-确保服务器安装了 `uv` (一个极速 Python 包管理器)。
+### 1. 环境安装
+本项目使用 `uv` 进行极速依赖管理（如果没有 `uv`，请先安装：`curl -LsSf https://astral.sh/uv/install.sh | sh`）。
+
 ```bash
-curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh) | sh
+# 克隆项目后，在项目根目录执行：
+chmod +x run.sh
 ```
 
-### 2. 准备模板 (Templates)
-在 `templates/` 目录下放入你的计算模板。文件名必须固定，后缀决定调用哪个软件（`.gjf` -> Gaussian, `.inp` -> ORCA）。
+### 2. 准备计算模板 (Templates)
+在 `templates/` 文件夹中放入你的输入文件模板。脚本会根据后缀名自动判断调用哪个程序（`.gjf` -> Gaussian, `.inp` -> ORCA）。
 
-**必需的四个模板：**
-* `opt.gjf` (结构优化)
-* `sp.gjf` (高精度单点)
-* `gas.gjf` (气相低精度单点)
-* `solv.gjf` (液相溶剂化能)
+**必须包含的 4 个模板：**
+* `opt.gjf` 或 `opt.inp` (结构优化)
+* `sp.gjf` 或 `sp.inp` (高精度单点能)
+* `gas.gjf` 或 `gas.inp` (气相热力学校正)
+* `solv.gjf` 或 `solv.inp` (液相溶剂化能)
 
-**模板规则 (必须包含以下占位符)：**
-* `[NAME]`: 会被替换为任务名
-* `[Charge]`: 会被替换为电荷
-* `[Multiplicity]`: 会被替换为多重度
-* `[GEOMETRY]`: 会被替换为坐标
+**⚠️ 模板占位符规则 (必须严格遵守)：**
+脚本通过替换以下关键词来生成输入文件：
+* `[NAME]`: 任务名称
+* `[Charge]`: 电荷
+* `[Multiplicity]`: 自旋多重度
+* `[GEOMETRY]`: 分子坐标部分
 
-> **示例 (opt.gjf):**
+> **Gaussian 模板示例 (`templates/opt.gjf`):**
 > ```text
 > %chk=[NAME].chk
+> %nprocshared=16
+> %mem=32GB
 > #p M062X/6-31G(d) opt freq
-> 
+>
 > Title: [NAME] optimization
-> 
+>
 > [Charge] [Multiplicity]
 > [GEOMETRY]
-> 
+>
 > ```
 
-### 3. 准备原料 (XYZ)
-在 `xyz/` 目录下放入 `.xyz` 文件。
-**注意：第二行必须写明电荷和多重度！**
+### 3. 准备分子文件 (XYZ)
+将 `.xyz` 文件放入 `xyz/` 目录。
+**注意：XYZ 文件的第二行注释行必须包含 `Charge` 和 `Multiplicity` 信息！**
 
-> **示例 (h2o.xyz):**
+> **示例 (`xyz/test_mol.xyz`):**
 > ```text
 > 3
-> Charge = 0 Multiplicity = 1  <-- 这一行非常重要！！
+> Charge = 0 Multiplicity = 1    <-- 脚本通过正则读取这一行
 > O       0.00000000      0.00000000      0.00000000
 > H       0.75860200      0.00000000      0.50428400
 > H       0.75860200      0.00000000     -0.50428400
 > ```
 
-### 4. 启动！
+### 4. 启动运行
 ```bash
-# 赋予运行权限
-chmod +x run.sh
-
-# 后台启动 (推荐，防止断网)
+# 方式一：后台运行 (推荐，防止断网中断，日志在 workflow.log)
 ./run.sh
 
-# 或者直接前台运行看效果
+# 方式二：前台运行 (可以直接看到 TUI 界面)
 uv run main.py
 ```
 
-然后你就可以去喝咖啡了 ☕️。
+---
+
+## 🧹 清扫模式 (Sweeper Mode)
+
+有时候你可能想算一些与主线流程无关的任务（比如某个分子的特殊基组单点，或者手动测试一个输入文件）。
+
+1.  直接将写好的输入文件（`.gjf` 或 `.inp`）放入 `extra_jobs/` 文件夹。
+2.  脚本会在主线任务（XYZ 流程）全部完成或暂时无事可做时，**自动扫描并运行**该文件夹下的任务。
+3.  状态会显示在 TUI 界面的下半部分 "Sweeper Tasks" 面板中。
 
 ---
 
-## ⚙️ 高级配置
+## 📊 结果输出 (Output)
 
-打开 `src/config.py` 可以修改核心设置：
+当一个分子的所有步骤 (`opt` -> `gas`, `solv`, `sp`) 都完成后，脚本会自动计算吉布斯自由能：
 
-1.  **修改运行命令** (`COMMAND_MAP`)：
-    * 默认是 `g16 < {input} > {output}`。
-    * 如果你用 Slurm，可以改成 `sbatch {input}`。
-    * 如果你用 ORCA，记得改成绝对路径 `/opt/orca/orca {input} > {output}`。
+$$G_{final} = E_{sp} + G_{corr} + \Delta G_{solv} + \Delta G_{conc}$$
 
-2.  **特殊物种校正** (`_SPECIAL_CORRECTIONS_KCAL`)：
-    * 默认标准态校正为 1.89 kcal/mol (1 atm $\to$ 1 M)。
-    * 如果是纯溶剂水 (`h2o`)，可能需要其他校正值。
+结果会追加写入根目录下的 `results.csv`：
 
----
-
-## 📊 仪表盘图例
-
-脚本运行时会显示如下面板：
-
-| 状态 | 颜色 | 含义 |
-| :--- | :--- | :--- |
-| **[PENDING]** | 灰色 | 排队中，还没轮到它 |
-| **[RUNNING]** | 🟨 黄色 | 正在玩命计算中，请勿打扰 |
-| **[DONE 2h]** | 🟩 绿色 | 算完了，耗时 2 小时 |
-| **[ERROR]** | 🟥 红色 | 报错了 (收敛失败/格式错误)，详情看下方日志 |
+| Molecule | G_Final (kcal/mol) | E_SP (Ha) | E_Gas (Ha) | ... |
+| :--- | :--- | :--- | :--- | :--- |
+| test_mol | -12345.67 | -100.123 | -100.120 | ... |
 
 ---
 
-## 🛠 常见问题 (Q&A)
+## ⚙️ 高级配置 (Configuration)
 
-**Q: 我想加个新分子怎么办？**
-A: 直接把新的 `.xyz` 文件扔进 `xyz/` 目录。脚本会在跑完当前这一步后，立刻发现新文件，并根据修改时间优先处理它。
+编辑 `src/config.py` 可修改核心参数：
 
-**Q: 任务算错了，我想重算怎么办？**
-A: 删掉 `data/` 对应子目录下生成的 `.out` 或 `.log` 文件，脚本下一次扫描时会发现它是 MISSING 或 ERROR，然后自动重新提交。
-
-**Q: 为什么我的 ORCA 任务没跑？**
-A: 检查 `config.py` 里的 ORCA 路径是否正确，以及 `templates/` 下是否有对应的 `.inp` 模板。
+* **程序路径与命令** (`COMMAND_MAP`)：
+    * 修改调用 Gaussian 或 ORCA 的具体命令（例如改为 `sbatch` 提交作业）。
+    * 默认：
+        * `.gjf`: `g09 < {input} > {output}`
+        * `.inp`: `/usr/local/quantum/orca/orca {input} > {output}`
+* **浓度校正** (`_DG_CONC_KCAL`)：
+    * 默认校正值为 1.89 kcal/mol (1 atm -> 1 M)。
+* **特殊溶剂校正** (`_SPECIAL_CORRECTIONS_KCAL`)：
+    * 针对特定分子（如水分子的气液相变标准态不同）进行特殊处理。
 
 ---
 
-## ⚖️ 免责声明
-* 本脚本计算结果仅供参考，发表文章前请务必人工核对关键数据。
-* 机时宝贵，请确认模板基组和泛函设置正确后再批量运行。
+## ⌨️ 快捷键 (Shortcuts)
 
-**(C) 2025 Listener1379**
+在 TUI 界面中：
+* `q`: 安全退出程序（会尝试停止当前正在运行的子进程）。
+* `s`: 强制停止当前正在运行的任务（Kill Process）。
+
+---
+
+## ⚠️ 注意事项
+
+1.  **文件名规范**：尽量使用英文、数字和下划线命名 `.xyz` 文件，避免特殊字符。
+2.  **错误处理**：如果某个任务显示 `[ERROR]`，请检查 `data/` 对应目录下的 `.out` 或 `.log` 文件。修复问题后，**只需删除该报错的输出文件**，脚本在下一轮扫描时会自动检测到“文件缺失”并重新提交计算。
+3.  **Orca 并行**：如果使用 ORCA 并行计算，请确保在模板中正确书写 `%pal nprocs ... end`，并在 `config.py` 的命令中无需额外修改。
+
+---
+
+**(C) 2025 Automated Gibbs Workflow Project**
