@@ -36,7 +36,7 @@ class OptGenerator:
         # Line 3+: Coords
         # 修复：使用 strip() 去除首尾空白，并只添加一个换行符，防止多余空行
         coords_raw = "".join([line for line in lines[2:] if line.strip()])
-        coords = coords_raw.strip() + "\n"
+        coords = coords_raw.strip()
         
         return charge, mult, coords
 

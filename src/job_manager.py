@@ -21,6 +21,9 @@ class JobManager:
             if is_opt:
                 if not parser.is_converged(): return "ERR_NC", "Not Converged"
                 if parser.has_imaginary_freq(): return "ERR_IMG", "Imag Freq"
+                # [新增] 强制检查是否提取到了热力学数据
+                if parser.get_thermal_correction() is None:
+                    return "ERR_DATA", "No G Corr"
             return "DONE", ""
         except Exception as e: return "ERROR", str(e)
 
@@ -32,15 +35,28 @@ class JobManager:
             return False
 
         output_file = job_file.with_suffix(".out")
-        cmd = cmd_template.format(input=str(job_file), output=str(output_file))
+        
+        # [修复] 获取任务所在的目录和纯文件名
+        work_dir = job_file.parent.resolve()
+        input_name = job_file.name
+        output_name = output_file.name
+        
+        # [修复] 命令中只使用文件名，因为我们将切换工作目录
+        cmd = cmd_template.format(input=input_name, output=output_name)
         
         if self.tracker: 
             self.tracker.start_task(mol_name, step)
             self.tracker.set_running_msg(f"Running: {mol_name} [{step.upper()}] ... 0s")
 
-        # --- 修改开始：移除 try-except KeyboardInterrupt ---
         try:
-            self.current_proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # [修复] 添加 cwd=work_dir，让 Gaussian/ORCA 在子目录中运行
+            self.current_proc = subprocess.Popen(
+                cmd, 
+                shell=True, 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL,
+                cwd=work_dir  # <--- 关键修改
+            )
             
             start_time = time.time()
             
