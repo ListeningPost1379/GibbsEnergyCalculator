@@ -1,5 +1,5 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, DataTable, Static, Label
+from textual.widgets import Header, Footer, DataTable, Static, Label, ContentSwitcher
 from textual.containers import Container
 from textual import work
 from typing import List
@@ -27,11 +27,16 @@ class GibbsApp(App):
         color: white;
         padding-left: 1;
     }
+    /* 确保切换器占满除 Header/Footer 外的空间 */
+    ContentSwitcher {
+        height: 1fr;
+    }
     """
     
     BINDINGS = [
         ("q", "quit", "Quit"),
-        ("s", "stop_task", "Stop Current Task")
+        ("s", "stop_task", "Stop Current Task"),
+        ("t", "toggle_view", "Switch View (Main/Sweep)")  # 新增按键说明
     ]
 
     def __init__(self, workflow_func, tracker, job_manager, stop_event):
@@ -49,10 +54,20 @@ class GibbsApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield Label("🔹 Main Workflow (Gibbs Energy)")
-        yield DataTable(id="main_table", zebra_stripes=True)
-        yield Label("🧹 Sweeper Tasks (Extra Jobs)")
-        yield DataTable(id="sweep_table", zebra_stripes=True)
+        
+        # 使用 ContentSwitcher 来管理两个表格的显示，初始显示 main_view
+        with ContentSwitcher(initial="main_view", id="switcher"):
+            
+            # 视图 1: 主工作流表格
+            with Container(id="main_view"):
+                yield Label("🔹 Main Workflow (Gibbs Energy) - Press 't' to switch")
+                yield DataTable(id="main_table", zebra_stripes=True)
+            
+            # 视图 2: 扫尾任务表格
+            with Container(id="sweep_view"):
+                yield Label("🧹 Sweeper Tasks (Extra Jobs) - Press 't' to switch")
+                yield DataTable(id="sweep_table", zebra_stripes=True)
+
         yield Static(id="status_bar", content="Initializing...")
         yield Footer()
 
@@ -76,6 +91,14 @@ class GibbsApp(App):
         self.job_manager.stop_current_job()
         self.query_one("#status_bar", Static).update("⚠️ Sending Kill Signal...")
 
+    def action_toggle_view(self):
+        """切换当前显示的表格视图"""
+        switcher = self.query_one("#switcher", ContentSwitcher)
+        if switcher.current == "main_view":
+            switcher.current = "sweep_view"
+        else:
+            switcher.current = "main_view"
+
     async def action_quit(self):
         if self.stop_event:
             self.stop_event.set()
@@ -92,6 +115,7 @@ class GibbsApp(App):
                 self.render_cache[cache_key] = content
 
     def update_table(self):
+        # 即使表格不可见，Textual 仍然维护其状态，因此可以直接更新数据
         main_table = self.query_one("#main_table", DataTable)
         sweep_table = self.query_one("#sweep_table", DataTable)
         status_bar = self.query_one("#status_bar", Static)
@@ -136,8 +160,7 @@ class GibbsApp(App):
                 main_table.add_row(*cells, key=row_key)
                 self.processed_mains.add(row_key)
 
-        # --- 新增：主表行删除逻辑 ---
-        # 如果 processed_mains 里有，但 current_main_rows 里没有，说明任务被删了
+        # --- 行删除逻辑 ---
         removed_mains = self.processed_mains - current_main_rows
         for row_key in removed_mains:
             main_table.remove_row(row_key)
@@ -174,7 +197,7 @@ class GibbsApp(App):
                     sweep_table.add_row(*cells, key=row_key)
                     self.processed_sweeps.add(row_key)
 
-        # --- 新增：清扫表行删除逻辑 ---
+        # --- 行删除逻辑 ---
         removed_sweeps = self.processed_sweeps - current_sweep_rows
         for row_key in removed_sweeps:
             sweep_table.remove_row(row_key)
